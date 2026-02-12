@@ -1,35 +1,42 @@
-import { Plugin } from 'obsidian';
+import { Plugin, Editor } from 'obsidian';
 
-export default class ZensicalRenderPlugin extends Plugin {
+export default class CalloutConverterPlugin extends Plugin {
     async onload() {
-        this.registerMarkdownPostProcessor((el, ctx) => {
-            const paragraphs = el.querySelectorAll("p");
+        this.addCommand({
+            id: 'convert-to-callout',
+            name: 'Convert custom syntax to callout',
+            editorCallback: (editor: Editor) => {
+                const lineCount = editor.lineCount();
+                
+                for (let i = 0; i < lineCount; i++) {
+                    const line = editor.getLine(i);
+                    const match = line.match(/^(\s*)(!!!|\?\?\?\+?)\s*(\S+)(.*)$/);
 
-            paragraphs.forEach((p) => {
-                const text = p.innerText.trim();
+                    if (match) {
+                        const indent = match[1] ?? "";
+                        const type = match[3] ?? "note";
+                        const title = (match[4] ?? "").trim();
 
-                if (text.startsWith("!!!")) {
-                    const match = text.match(/^!!!\s+(\w+)(?:\s+(.*))?/);
-                    if (match && match[1]) {
-                        const type = match[1];
-                        const title = match[2];
+                        const newLine = `${indent}> [!${type}]${title ? ' ' + title : ''}`;
+                        editor.setLine(i, newLine);
 
-                        const calloutEl = document.createElement("div");
-                        calloutEl.className = `callout admo-${type}`;
-                        calloutEl.setAttribute("data-callout", type);
+                        let j = i + 1;
+                        while (j < lineCount) {
+                            const nextLine = editor.getLine(j);
+                            
+                            if (nextLine.trim() !== '' && !nextLine.startsWith(indent)) break;
+                            
+                            const nextNextLine = editor.getLine(j + 1);
+                            if (nextLine.trim() === '' && (j + 1 < lineCount && nextNextLine && !nextNextLine.startsWith(indent))) break;
 
-                        const titleEl = calloutEl.createEl("div", { cls: "callout-title" });
-                        titleEl.createEl("div", { cls: "callout-icon" });
-                        titleEl.createEl("div", { 
-                            cls: "callout-title-inner", 
-                            text: title || (type.charAt(0).toUpperCase() + type.slice(1)) 
-                        });
-
-                        const contentEl = calloutEl.createEl("div", { cls: "callout-content" });
-                        p.replaceWith(calloutEl);
+                            const content = nextLine.startsWith(indent) ? nextLine.slice(indent.length) : nextLine;
+                            editor.setLine(j, `${indent}> ${content}`);
+                            j++;
+                        }
+                        i = j - 1;
                     }
                 }
-            });
+            }
         });
     }
 }
