@@ -1,57 +1,59 @@
-import { Plugin } from 'obsidian';
+import { Plugin } from "obsidian";
 
-export default class CalloutConverterPlugin extends Plugin {
-    async onload() {
-        this.registerMarkdownPostProcessor((element) => {
-            const lines = element.querySelectorAll("p, div, pre");
+export default class AdmonitionToCalloutPlugin extends Plugin {
 
-            lines.forEach((el) => {
-                const text = el.textContent || "";
-                const match = text.match(/^(!!!|\?\?\?\+?)\s+(\S+)(?:\s+"([^"]+)")?\s*(.*)$/);
+	onload() {
+		console.log("AdmonitionToCalloutPlugin loaded");
 
-                if (match && match[2]) {
-                    const type = match[2].toLowerCase();
-                    const quotedTitle = match[3];
-                    const remainingTitle = match[4] ? match[4].trim() : "";
-                    const title = quotedTitle || remainingTitle || type;
+		this.registerMarkdownPostProcessor((el, ctx) => {
+			this.processAdmonitions(el);
+		});
+	}
 
-                    const container = el.parentElement;
-                    if (!container) return;
+	processAdmonitions(container: HTMLElement) {
+		// 모든 pre > code 블록 또는 일반 텍스트 노드 탐색
+		const walker = document.createTreeWalker(
+			container,
+			NodeFilter.SHOW_TEXT,
+			null
+		);
 
-                    const calloutEl = document.createElement("div");
-                    calloutEl.addClass("callout");
-                    calloutEl.setAttr("data-callout", type);
+		const textNodes: Text[] = [];
+		while (walker.nextNode()) {
+			textNodes.push(walker.currentNode as Text);
+		}
 
-                    const titleEl = calloutEl.createDiv({ cls: "callout-title" });
-                    titleEl.createDiv({ cls: "callout-icon" });
-                    titleEl.createDiv({ cls: "callout-title-inner", text: title });
+		for (const node of textNodes) {
+			const text = node.textContent;
+			if (!text) continue;
 
-                    const contentEl = calloutEl.createDiv({ cls: "callout-content" });
+			// !!! asdf "zxcv" 패턴 감지
+			const regex = /!!!\s+(\w+)\s+"([^"]+)"\n([\s\S]*?)(?=\n{2,}|$)/g;
 
-                    let nextEl = el.nextElementSibling;
-                    const elementsToRemove: Element[] = [];
+			if (!regex.test(text)) continue;
 
-                    while (nextEl) {
-                        const nextText = nextEl.textContent || "";
-                        const isIndented = nextEl.tagName === "PRE" || 
-                                         (nextEl instanceof HTMLElement && nextEl.style.paddingLeft !== "") ||
-                                         /^\s+/.test(nextText);
+			const newHTML = text.replace(regex, (_, type, title, body) => {
+				const lines = body
+					.split("\n")
+					.map((l: string) => l.replace(/^\s+/, "")) // indent 제거
+					.filter((l: string) => l.trim().length > 0);
 
-                        if (isIndented) {
-                            const wrapper = document.createElement("div");
-                            wrapper.innerHTML = nextEl.innerHTML;
-                            contentEl.appendChild(wrapper);
-                            elementsToRemove.push(nextEl);
-                            nextEl = nextEl.nextElementSibling;
-                        } else {
-                            break;
-                        }
-                    }
+				const calloutLines = [
+					`> [!${type}] ${title}`,
+					...lines.map((l: string) => `> ${l}`)
+				];
 
-                    el.replaceWith(calloutEl);
-                    elementsToRemove.forEach(node => node.remove());
-                }
-            });
-        });
-    }
+				return calloutLines.join("\n");
+			});
+
+			// DOM 치환
+			const span = document.createElement("span");
+			span.className = "admonition-callout-rendered";
+			span.innerText = newHTML;
+
+			if (node.parentNode) {
+				node.parentNode.replaceChild(span, node);
+			}
+		}
+	}
 }
