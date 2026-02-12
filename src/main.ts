@@ -2,29 +2,59 @@ import { Plugin, MarkdownView } from 'obsidian';
 
 export default class ZensicalRenderPlugin extends Plugin {
     async onload() {
-        // 1. 읽기 모드용 프로세서 (기존 코드)
-        this.registerMarkdownPostProcessor((el, ctx) => {
+        // 1. 읽기 모드 프로세서
+        this.registerMarkdownPostProcessor((el) => {
             const paragraphs = el.querySelectorAll("p");
             paragraphs.forEach((p) => {
                 const text = p.innerText.trim();
-                if (text.startsWith("!!!")) {
-                    this.renderCallout(p, text);
+                if (/^(!{3}|\?{3}\+?)/.test(text)) {
+                    this.replaceWithCallout(p as HTMLElement, text);
                 }
             });
         });
 
-        // 2. 라이브 프리뷰 지원을 위한 레이아웃 업데이트 감지
-        // (참고: 정석은 EditorExtension이지만, 초보 단계에서는 post-processor가 
-        // 라이브 프리뷰의 '완성된 블록'에도 적용되도록 설정하는 것이 빠릅니다.)
+        // 2. 라이브 프리뷰 실시간 감시 (0.5초마다 스캔)
+        this.registerInterval(window.setInterval(() => this.updateLivePreview(), 500));
     }
 
-    renderCallout(el: HTMLElement, text: string) {
-        const match = text.match(/^!!!\s+(\w+)(?:\s+(.*))?/);
-        if (match && match[1]) {
-            const [, type, title] = match;
+    updateLivePreview() {
+        const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (!activeView || activeView.getMode() !== 'source') return;
+
+        const editorEl = activeView.contentEl.querySelectorAll(".cm-line");
+        editorEl.forEach((line: HTMLElement) => {
+            const text = line.textContent?.trim();
+            if (text && /^(!{3}|\?{3}\+?)/.test(text) && !line.querySelector(".callout")) {
+                this.replaceWithCallout(line, text);
+            }
+        });
+    }
+
+    replaceWithCallout(el: HTMLElement, text: string) {
+        const match = text.match(/^(!{3}|\?{3}\+?)\s+(\w+)(?:\s+(.*))?/);
+        
+        // match 결과가 있고, syntax와 type이 확실히 존재할 때만 실행
+        if (match && match[1] && match[2]) {
+            const syntax = match[1];
+            const type = match[2];
+            const title = match[3];
+
+            const isCollapsible = syntax.startsWith("???");
+            const isDefaultOpen = syntax.endsWith("+");
+
             const calloutEl = document.createElement("div");
+            
+            // 옵시디언 표준 클래스 부여
             calloutEl.className = `callout admo-${type}`;
             calloutEl.setAttribute("data-callout", type);
+
+            // 접기 설정 적용
+            if (isCollapsible) {
+                calloutEl.classList.add("is-collapsible");
+                if (!isDefaultOpen) {
+                    calloutEl.classList.add("is-collapsed");
+                }
+            }
 
             const titleEl = calloutEl.createEl("div", { cls: "callout-title" });
             titleEl.createEl("div", { cls: "callout-icon" });
@@ -33,8 +63,15 @@ export default class ZensicalRenderPlugin extends Plugin {
                 text: title || (type.charAt(0).toUpperCase() + type.slice(1)) 
             });
 
+            // 접기 아이콘 추가
+            if (isCollapsible) {
+                titleEl.createEl("div", { cls: "callout-fold" });
+            }
+
             calloutEl.createEl("div", { cls: "callout-content" });
-            el.replaceWith(calloutEl);
+            
+            el.empty();
+            el.appendChild(calloutEl);
         }
     }
 }
