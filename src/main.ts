@@ -1,24 +1,22 @@
 import { Plugin } from "obsidian";
 
-export default class AdmonitionToCalloutPlugin extends Plugin {
+export default class AdmonitionRenderPlugin extends Plugin {
 
 	onload() {
-		console.log("AdmonitionToCalloutPlugin loaded");
-
-		this.registerMarkdownPostProcessor((el, ctx) => {
-			this.processAdmonitions(el);
+		this.registerMarkdownPostProcessor((el) => {
+			this.renderAdmonitions(el);
 		});
 	}
 
-	processAdmonitions(container: HTMLElement) {
-		// 모든 pre > code 블록 또는 일반 텍스트 노드 탐색
+	renderAdmonitions(container: HTMLElement) {
+		const textNodes: Text[] = [];
+
 		const walker = document.createTreeWalker(
 			container,
 			NodeFilter.SHOW_TEXT,
 			null
 		);
 
-		const textNodes: Text[] = [];
 		while (walker.nextNode()) {
 			textNodes.push(walker.currentNode as Text);
 		}
@@ -27,32 +25,64 @@ export default class AdmonitionToCalloutPlugin extends Plugin {
 			const text = node.textContent;
 			if (!text) continue;
 
-			// !!! asdf "zxcv" 패턴 감지
 			const regex = /!!!\s+(\w+)\s+"([^"]+)"\n([\s\S]*?)(?=\n{2,}|$)/g;
+			const matches = [...text.matchAll(regex)];
+			if (matches.length === 0) continue;
 
-			if (!regex.test(text)) continue;
+			for (const match of matches) {
+				const full = match[0];
+				const type = match[1];
+				const title = match[2];
+				const body = match[3];
 
-			const newHTML = text.replace(regex, (_, type, title, body) => {
+				if (!full || !type || !title || !body) continue; // 타입 가드
+
 				const lines = body
 					.split("\n")
-					.map((l: string) => l.replace(/^\s+/, "")) // indent 제거
-					.filter((l: string) => l.trim().length > 0);
+					.map(l => l.replace(/^\s+/, ""))
+					.filter(l => l.trim().length > 0);
 
-				const calloutLines = [
-					`> [!${type}] ${title}`,
-					...lines.map((l: string) => `> ${l}`)
-				];
+				// --- callout DOM 생성 ---
+				const callout = document.createElement("div");
+				callout.className = `callout callout-${type}`;
 
-				return calloutLines.join("\n");
-			});
+				const titleDiv = document.createElement("div");
+				titleDiv.className = "callout-title";
 
-			// DOM 치환
-			const span = document.createElement("span");
-			span.className = "admonition-callout-rendered";
-			span.innerText = newHTML;
+				const iconDiv = document.createElement("div");
+				iconDiv.className = "callout-icon";
 
-			if (node.parentNode) {
-				node.parentNode.replaceChild(span, node);
+				const titleInner = document.createElement("div");
+				titleInner.className = "callout-title-inner";
+				titleInner.textContent = title; // 이제 타입 에러 없음
+
+				titleDiv.appendChild(iconDiv);
+				titleDiv.appendChild(titleInner);
+
+				const contentDiv = document.createElement("div");
+				contentDiv.className = "callout-content";
+
+				for (const line of lines) {
+					const p = document.createElement("p");
+					p.textContent = line;
+					contentDiv.appendChild(p);
+				}
+
+				callout.appendChild(titleDiv);
+				callout.appendChild(contentDiv);
+
+				// --- 기존 텍스트 교체 ---
+				if (node.parentNode && match.index !== undefined) {
+					const before = text.slice(0, match.index);
+					const after = text.slice(match.index + full.length);
+
+					const frag = document.createDocumentFragment();
+					if (before) frag.append(document.createTextNode(before));
+					frag.append(callout);
+					if (after) frag.append(document.createTextNode(after));
+
+					node.parentNode.replaceChild(frag, node);
+				}
 			}
 		}
 	}
